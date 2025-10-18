@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-Hourly Crypto Telegram Bot (with API fallbacks)
+Hourly Crypto Telegram Bot (with API fallbacks + Groq summary)
 
 - Fetches crypto prices from CoinGecko, CoinPaprika, CoinCap, or CryptoCompare.
 - Posts formatted prices to a Telegram chat/channel.
 - Has modes: --once, --demo, or continuous posting every INTERVAL_MINUTES.
+- Adds a funny two-line Groq AI summary (mixtral-8x7b model).
 
 Credit footer:
   *Pricing by t.me/hourlycrypto • Prices computed from [API_NAME]*
 
 Requirements:
   pip install requests
+  export GROQ_API_KEY=your_groq_api_key_here
 """
 
 import os
@@ -22,6 +24,7 @@ from typing import Dict, Any, List, Optional
 import requests
 
 from groq import get_groq_summary
+
 
 # ========== Utility ==========
 def load_env_from_dotenv(path: str = ".env") -> None:
@@ -187,10 +190,6 @@ def get_crypto_data(vs_currency: str, ids: Optional[List[str]], top_n: int) -> t
     print("❌ All API sources failed! Please contact @patointeressante on Telegram.")
     sys.exit(1)
 
-# After coins are fetched and message lines built:
-summary = get_groq_summary(coins, vs)
-lines.append(summary)
-lines.append(f"\n<i>Pricing by t.me/hourlycrypto • Prices computed from {api_name}</i>")
 
 # ========== Telegram ==========
 def send_telegram_message(token: str, chat_id: str, text: str) -> Dict[str, Any]:
@@ -231,6 +230,12 @@ def build_message(coins: list[dict], vs: str, api_name: str, include_1h=True, in
             lines.append(" ".join(parts))
         except Exception:
             pass
+
+    # Add Groq summary below crypto list
+    summary = get_groq_summary(coins, vs)
+    lines.append(summary)
+
+    # Add italic footer
     lines.append(f"\n<i>Pricing by t.me/hourlycrypto • Prices computed from {api_name}</i>")
     return "\n".join(lines)
 
@@ -247,6 +252,7 @@ def post_once(api_fallback=True) -> None:
     include_mcap = get_bool_env("INCLUDE_MARKET_CAP", False)
     include_24h = get_bool_env("INCLUDE_24H", True)
     include_1h = get_bool_env("INCLUDE_1H", True)
+
     coins, api_name = get_crypto_data(vs, ids or None, top_n)
     msg = build_message(coins, vs, api_name, include_1h, include_24h, include_mcap)
     send_telegram_message(token, chat_id, msg)
@@ -261,7 +267,7 @@ def main(argv: List[str]) -> None:
     elif "--demo" in args:
         post_once()
     else:
-        post_once()  # Simplified; can re-enable full scheduling later
+        post_once()  # Continuous scheduling can be added later
 
 
 if __name__ == "__main__":
