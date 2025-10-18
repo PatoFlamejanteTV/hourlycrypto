@@ -5,14 +5,13 @@ Hourly Crypto Telegram Bot (with API fallbacks + Groq summary)
 - Fetches crypto prices from CoinGecko, CoinPaprika, CoinCap, or CryptoCompare.
 - Posts formatted prices to a Telegram chat/channel.
 - Has modes: --once, --demo, or continuous posting every INTERVAL_MINUTES.
-- Adds a funny two-line Groq AI summary (mixtral-8x7b model).
+- Adds a fun Groq AI summary under the crypto list.
 
 Credit footer:
   *Pricing by t.me/hourlycrypto • Prices computed from [API_NAME]*
 
 Requirements:
-  pip install requests
-  export GROQ_API_KEY=your_groq_api_key_here
+  pip install requests groq
 """
 
 import os
@@ -24,7 +23,6 @@ from typing import Dict, Any, List, Optional
 import requests
 
 from groq import get_groq_summary
-
 
 # ========== Utility ==========
 def load_env_from_dotenv(path: str = ".env") -> None:
@@ -231,11 +229,15 @@ def build_message(coins: list[dict], vs: str, api_name: str, include_1h=True, in
         except Exception:
             pass
 
-    # Add Groq summary below crypto list
-    summary = get_groq_summary(coins, vs)
-    lines.append(summary)
+    # Add funny Groq summary
+    try:
+        summary = get_groq_summary(coins, vs)
+        if summary:
+            lines.append("\n" + summary)
+    except Exception as e:
+        print(f"Groq summary failed: {e}")
 
-    # Add italic footer
+    # Footer
     lines.append(f"\n<i>Pricing by t.me/hourlycrypto • Prices computed from {api_name}</i>")
     return "\n".join(lines)
 
@@ -252,26 +254,34 @@ def post_once(api_fallback=True) -> None:
     include_mcap = get_bool_env("INCLUDE_MARKET_CAP", False)
     include_24h = get_bool_env("INCLUDE_24H", True)
     include_1h = get_bool_env("INCLUDE_1H", True)
-
     coins, api_name = get_crypto_data(vs, ids or None, top_n)
     msg = build_message(coins, vs, api_name, include_1h, include_24h, include_mcap)
     send_telegram_message(token, chat_id, msg)
     print(f"✅ Posted {len(coins)} coins using {api_name}")
 
 
+# ========== Auto Scheduling ==========
 def main(argv: List[str]) -> None:
     load_env_from_dotenv()
     args = set(a.lower() for a in argv[1:])
+    interval = get_int_env("INTERVAL_MINUTES", 60)
+
     if "--once" in args or "-1" in args:
         post_once()
     elif "--demo" in args:
         post_once()
     else:
-        post_once()  # Continuous scheduling can be added later
+        print(f"⏳ Running continuously every {interval} minutes.")
+        while True:
+            try:
+                post_once()
+            except Exception as e:
+                print(f"⚠️ Error in post_once: {e}")
+            time.sleep(interval * 60)
 
 
 if __name__ == "__main__":
     try:
         main(sys.argv)
     except KeyboardInterrupt:
-        pass
+        print("\n🛑 Stopped by user.")
