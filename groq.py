@@ -30,7 +30,7 @@ def get_groq_summary(coins_list, vs):
                 "Content-Type": "application/json"
             },
             json={
-                "model": "mixtral-8x7b",
+                "model": "llama-3.1-8b-instant",
                 "messages": [
                     {"role": "system", "content": "You are a goofy crypto market commentator."},
                     {"role": "user", "content": prompt}
@@ -38,7 +38,7 @@ def get_groq_summary(coins_list, vs):
                 "max_tokens": 40,
                 "temperature": 0.9
             },
-            timeout=15
+            timeout=10
         )
 
         print(f"[Groq Debug] Status code: {response.status_code}")
