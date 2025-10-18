@@ -40,10 +40,10 @@ def get_groq_summary(coins_list, vs):
                     {"role": "system", "content": "You are a goofy crypto market commentator."},
                     {"role": "user", "content": prompt}
                 ],
-                "max_tokens": 40,
-                "temperature": 0.9
+                "max_tokens": 140,
+                "temperature": 1
             },
-            timeout=15
+            timeout=25
         )
 
         print(f"[Groq Debug] Status code: {response.status_code}")

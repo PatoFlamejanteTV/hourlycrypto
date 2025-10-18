@@ -207,7 +207,7 @@ def send_telegram_message(token: str, chat_id: str, text: str) -> Dict[str, Any]
     log("📤 Sending message to Telegram...")
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-    r = requests.post(url, json=payload, timeout=20)
+    r = requests.post(url, json=payload, timeout=:20)
     try:
         data = r.json()
     except Exception:
@@ -254,7 +254,7 @@ def build_message(coins: list[dict], vs: str, api_name: str, include_1h=True, in
         log(f"⚠️ Groq summary failed: {e}")
 
     # Footer
-    lines.append(f"\n<i>Pricing by t.me/hourlycrypto • Prices computed from {api_name}</i>")
+    lines.append(f"\n<i>Pricing by <b>t.me/hourlycrypto</b> • Prices computed from {api_name}.</i>")
     return "\n".join(lines)
 
 
