@@ -21,6 +21,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 import requests
 
+from groq import get_groq_summary
 
 # ========== Utility ==========
 def load_env_from_dotenv(path: str = ".env") -> None:
@@ -186,6 +187,10 @@ def get_crypto_data(vs_currency: str, ids: Optional[List[str]], top_n: int) -> t
     print("❌ All API sources failed! Please contact @patointeressante on Telegram.")
     sys.exit(1)
 
+# After coins are fetched and message lines built:
+summary = get_groq_summary(coins, vs)
+lines.append(summary)
+lines.append(f"\n<i>Pricing by t.me/hourlycrypto • Prices computed from {api_name}</i>")
 
 # ========== Telegram ==========
 def send_telegram_message(token: str, chat_id: str, text: str) -> Dict[str, Any]:
