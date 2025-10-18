@@ -18,7 +18,7 @@ def get_groq_summary(coins_list, vs):
 
         prompt = (
             f"Crypto today ({vs.upper()}): {quick_summary}\n"
-            "Make exactly 2 short, funny lines reacting to the market mood. "
+            "Make exactly one short, funny line reacting to the market mood. "
             "Be simple, dumb, and light-hearted."
         )
 
