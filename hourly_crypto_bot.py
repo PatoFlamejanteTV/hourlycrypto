@@ -11,6 +11,7 @@ Configuration (environment variables or .env file):
   TELEGRAM_CHAT_ID     = Target chat identifier, e.g. -1001234567890 or @channelusername
   CURRENCY             = Fiat currency code for prices (default: usd)
   TOP_N                = Number of top coins to show (default: 10)
+ is workin  COIN_IDS             = Comma-separated CoinGecko IDs to show (overrides TOP_N), e.g. bitcoin,tether,toncoin,tether-gold
   INCLUDE_MARKET_CAP   = true/false to include market cap in each line (default: false)
   INCLUDE_24H          = true/false to include 24h change (default: true)
   INCLUDE_1H           = true/false to include 1h change (default: true)
@@ -127,6 +128,32 @@ def get_top_coins(vs_currency: str = "usd", per_page: int = 10) -> List[Dict[str
     return data
 
 
+def get_coins_by_ids(ids: List[str], vs_currency: str = "usd") -> List[Dict[str, Any]]:
+    url = "https://api.coingecko.com/api/v3/coins/markets"
+    # CoinGecko expects IDs, not symbols. Example IDs:
+    # - bitcoin (BTC), tether (USDT), toncoin (TON), tether-gold (XAUT)
+    params = {
+        "vs_currency": vs_currency,
+        "ids": ",".join(ids),
+        "order": "market_cap_desc",
+        "per_page": max(1, min(len(ids), 250)),
+        "page": 1,
+        "sparkline": "false",
+        "price_change_percentage": "1h,24h",
+        "locale": "en",
+    }
+    headers = {"Accept": "application/json"}
+    resp = requests.get(url, params=params, headers=headers, timeout=20)
+    resp.raise_for_status()
+    data = resp.json()
+    if not isinstance(data, list):
+        raise RuntimeError("Unexpected response from CoinGecko")
+    # Preserve requested order
+    by_id = {c.get("id"): c for c in data if isinstance(c, dict)}
+    ordered = [by_id[i] for i in ids if i in by_id]
+    return ordered
+
+
 def build_message(
     coins: List[Dict[str, Any]],
     vs: str,
@@ -198,13 +225,18 @@ def post_once() -> None:
         sys.exit(1)
 
     vs = os.getenv("CURRENCY", "usd")
+    coin_ids_env = os.getenv("COIN_IDS")
     top_n = get_int_env("TOP_N", 10)
     include_mcap = get_bool_env("INCLUDE_MARKET_CAP", False)
     include_24h = get_bool_env("INCLUDE_24H", True)
     include_1h = get_bool_env("INCLUDE_1H", True)
 
     # Fetch and send
-    coins = get_top_coins(vs_currency=vs, per_page=top_n)
+    if coin_ids_env:
+        ids = [x.strip() for x in coin_ids_env.split(",") if x.strip()]
+        coins = get_coins_by_ids(ids, vs_currency=vs)
+    else:
+        coins = get_top_coins(vs_currency=vs, per_page=top_n)
     message = build_message(coins, vs=vs, include_1h=include_1h, include_24h=include_24h, include_mcap=include_mcap)
     send_telegram_message(token, chat_id, message)
     print(f"Posted {len(coins)} coins to Telegram chat {chat_id}.")
@@ -236,6 +268,7 @@ def run_forever() -> None:
         sys.exit(1)
 
     vs = os.getenv("CURRENCY", "usd")
+    coin_ids_env = os.getenv("COIN_IDS")
     top_n = get_int_env("TOP_N", 10)
     include_mcap = get_bool_env("INCLUDE_MARKET_CAP", False)
     include_24h = get_bool_env("INCLUDE_24H", True)
@@ -262,7 +295,11 @@ def run_forever() -> None:
 
     while not stop["flag"]:
         try:
-            coins = get_top_coins(vs_currency=vs, per_page=top_n)
+            if coin_ids_env:
+                ids = [x.strip() for x in coin_ids_env.split(",") if x.strip()]
+                coins = get_coins_by_ids(ids, vs_currency=vs)
+            else:
+                coins = get_top_coins(vs_currency=vs, per_page=top_n)
             message = build_message(
                 coins, vs=vs, include_1h=include_1h, include_24h=include_24h, include_mcap=include_mcap
             )
