@@ -40,7 +40,7 @@ def get_groq_summary(coins_list, vs):
                     {"role": "system", "content": "You are a goofy crypto market commentator."},
                     {"role": "user", "content": prompt}
                 ],
-                "max_tokens": 140,
+                "max_tokens": 180,
                 "temperature": 1
             },
             timeout=25
