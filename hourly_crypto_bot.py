@@ -100,6 +100,8 @@ def fmt_pct(p: Optional[float]) -> str:
         return f"{arrow}{p}%"
 
 
+# ------------------- CRYPTO FETCH WITH FALLBACK -------------------
+
 def get_top_coins(vs_currency: str = "usd", per_page: int = 10) -> List[Dict[str, Any]]:
     url = "https://api.coingecko.com/api/v3/coins/markets"
     params = {
@@ -143,6 +145,81 @@ def get_coins_by_ids(ids: List[str], vs_currency: str = "usd") -> List[Dict[str,
     return ordered
 
 
+def fetch_coins_fallback(ids: Optional[List[str]] = None, vs_currency: str = "usd", top_n: int = 10) -> List[Dict[str, Any]]:
+    BOT_CONTACT = "@patointeressante"
+
+    # Lista de endpoints alternativos
+    endpoints = []
+
+    if ids:
+        endpoints.append(lambda: get_coins_by_ids(ids, vs_currency=vs_currency))
+    else:
+        endpoints.append(lambda: get_top_coins(vs_currency=vs_currency, per_page=top_n))
+
+    # CoinPaprika alternativa
+    def coinpaprika_fetch():
+        url = "https://api.coinpaprika.com/v1/tickers"
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        coins = []
+        for c in data[:top_n]:
+            coins.append({
+                "id": c.get("id"),
+                "symbol": c.get("symbol"),
+                "name": c.get("name"),
+                "current_price": c.get("quotes", {}).get(vs_currency.upper(), {}).get("price"),
+                "price_change_percentage_1h_in_currency": None,
+                "price_change_percentage_24h_in_currency": c.get("quotes", {}).get(vs_currency.upper(), {}).get("percent_change_24h"),
+                "market_cap": c.get("quotes", {}).get(vs_currency.upper(), {}).get("market_cap")
+            })
+        return coins
+    endpoints.append(coinpaprika_fetch)
+
+    # Nomics alternativa
+    def nomics_fetch():
+        api_key = "demo-1"
+        url = f"https://api.nomics.com/v1/currencies/ticker?key={api_key}&per-page={top_n}&convert={vs_currency.upper()}"
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        coins = []
+        for c in data:
+            coins.append({
+                "id": c.get("id"),
+                "symbol": c.get("symbol"),
+                "name": c.get("name"),
+                "current_price": float(c.get("price", 0)),
+                "price_change_percentage_1h_in_currency": None,
+                "price_change_percentage_24h_in_currency": float(c.get("1d", {}).get("price_change_pct", 0)) * 100,
+                "market_cap": float(c.get("market_cap", 0))
+            })
+        return coins
+    endpoints.append(nomics_fetch)
+
+    last_error = None
+    for fetcher in endpoints:
+        try:
+            coins = fetcher()
+            if coins:
+                return coins
+        except Exception as e:
+            last_error = e
+            continue
+
+    # Se nenhuma API funcionar, envia mensagem de erro
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if token and chat_id:
+        try:
+            send_telegram_message(token, chat_id, f"🚨 Nenhuma API de criptomoeda está funcionando no momento. Contate {BOT_CONTACT} no Telegram.")
+        except Exception:
+            pass
+    raise RuntimeError(f"All crypto APIs failed: {last_error}")
+
+
+# ------------------- MESSAGE BUILDING -------------------
+
 def build_message(
     coins: List[Dict[str, Any]],
     vs: str,
@@ -181,6 +258,8 @@ def build_message(
     return "\n".join(lines)
 
 
+# ------------------- TELEGRAM -------------------
+
 def send_telegram_message(token: str, chat_id: str, text: str) -> Dict[str, Any]:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
@@ -200,32 +279,9 @@ def send_telegram_message(token: str, chat_id: str, text: str) -> Dict[str, Any]
     return data
 
 
+# ------------------- MAIN BOT LOGIC -------------------
+
 def post_once() -> None:
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    if not token or not chat_id:
-        print("Error: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set (env or .env).")
-        sys.exit(1)
-
-    vs = os.getenv("CURRENCY", "usd")
-    coin_ids_env = os.getenv("COIN_IDS")
-    top_n = get_int_env("TOP_N", 10)
-    include_mcap = get_bool_env("INCLUDE_MARKET_CAP", False)
-    include_24h = get_bool_env("INCLUDE_24H", True)
-    include_1h = get_bool_env("INCLUDE_1H", True)
-
-    if coin_ids_env:
-        ids = [x.strip() for x in coin_ids_env.split(",") if x.strip()]
-        coins = get_coins_by_ids(ids, vs_currency=vs)
-    else:
-        coins = get_top_coins(vs_currency=vs, per_page=top_n)
-    message = build_message(coins, vs=vs, include_1h=include_1h, include_24h=include_24h, include_mcap=include_mcap)
-    send_telegram_message(token, chat_id, message)
-    print(f"Posted {len(coins)} coins to Telegram chat {chat_id}.")
-
-
-def demo_message() -> None:
-    """Fetch live crypto data and send a single demo message to Telegram."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
@@ -242,20 +298,41 @@ def demo_message() -> None:
     try:
         if coin_ids_env:
             ids = [x.strip() for x in coin_ids_env.split(",") if x.strip()]
-            coins = get_coins_by_ids(ids, vs_currency=vs)
+            coins = fetch_coins_fallback(ids=ids, vs_currency=vs, top_n=top_n)
         else:
-            coins = get_top_coins(vs_currency=vs, per_page=top_n)
+            coins = fetch_coins_fallback(ids=None, vs_currency=vs, top_n=top_n)
+        message = build_message(coins, vs=vs, include_1h=include_1h, include_24h=include_24h, include_mcap=include_mcap)
+        send_telegram_message(token, chat_id, message)
+        print(f"Posted {len(coins)} coins to Telegram chat {chat_id}.")
     except Exception as e:
-        print(f"Error fetching coin data: {e}")
+        print(f"Error fetching or sending coins: {e}")
+
+
+def demo_message() -> None:
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        print("Error: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set (env or .env).")
         sys.exit(1)
 
-    message = build_message(coins, vs=vs, include_1h=include_1h, include_24h=include_24h, include_mcap=include_mcap)
+    vs = os.getenv("CURRENCY", "usd")
+    coin_ids_env = os.getenv("COIN_IDS")
+    top_n = get_int_env("TOP_N", 10)
+    include_mcap = get_bool_env("INCLUDE_MARKET_CAP", False)
+    include_24h = get_bool_env("INCLUDE_24H", True)
+    include_1h = get_bool_env("INCLUDE_1H", True)
+
     try:
+        if coin_ids_env:
+            ids = [x.strip() for x in coin_ids_env.split(",") if x.strip()]
+            coins = fetch_coins_fallback(ids=ids, vs_currency=vs, top_n=top_n)
+        else:
+            coins = fetch_coins_fallback(ids=None, vs_currency=vs, top_n=top_n)
+        message = build_message(coins, vs=vs, include_1h=include_1h, include_24h=include_24h, include_mcap=include_mcap)
         send_telegram_message(token, chat_id, message)
         print(f"Demo message sent to Telegram chat {chat_id}.")
     except Exception as e:
-        print(f"Error sending message to Telegram: {e}")
-        sys.exit(1)
+        print(f"Error fetching or sending coins: {e}")
 
 
 def seconds_until_next_boundary(now: Optional[datetime], minutes: int) -> float:
@@ -306,9 +383,9 @@ def run_forever() -> None:
         try:
             if coin_ids_env:
                 ids = [x.strip() for x in coin_ids_env.split(",") if x.strip()]
-                coins = get_coins_by_ids(ids, vs_currency=vs)
+                coins = fetch_coins_fallback(ids=ids, vs_currency=vs, top_n=top_n)
             else:
-                coins = get_top_coins(vs_currency=vs, per_page=top_n)
+                coins = fetch_coins_fallback(ids=None, vs_currency=vs, top_n=top_n)
             message = build_message(
                 coins, vs=vs, include_1h=include_1h, include_24h=include_24h, include_mcap=include_mcap
             )
