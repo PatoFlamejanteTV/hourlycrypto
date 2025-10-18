@@ -54,6 +54,16 @@ def get_groq_summary(coins_list, vs):
 
         data = response.json()
         summary = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        usage = data.get("usage", {})
+
+        # Extract timing and token metrics
+        total_time = usage.get("total_time")
+        total_tokens = usage.get("total_tokens")
+        tps = (total_tokens / total_time) if total_time else None
+
+        if total_time is not None and total_tokens is not None and tps is not None:
+            print(f"[Groq Debug] Total time: {total_time:.3f}s | Total tokens: {total_tokens} | Tokens/sec: {tps:.2f}")
+
         if not summary:
             print("[Groq Debug] Empty summary content.")
             return "\n\n[Summary unavailable]"
