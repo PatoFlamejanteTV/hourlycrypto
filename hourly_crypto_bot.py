@@ -79,7 +79,7 @@ def format_price(v: Optional[float]) -> str:
 def fmt_pct(p: Optional[float]) -> str:
     if p is None:
         return "?%"
-    arrow = "" if p == 0 else ("▲" if p > 0 else "▼")
+    arrow = "" if p == 0 else ("▲🟢" if p > 0 else "▼🔴")
     sign = "+" if p and p > 0 else ""
     try:
         return f"{arrow}{sign}{p:.2f}%"
