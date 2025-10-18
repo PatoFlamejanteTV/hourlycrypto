@@ -1,12 +1,13 @@
-import os
-import requests
-import json
-
 def get_groq_summary(coins_list, vs):
+    import os
+    import requests
+
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         print("[Groq Debug] Missing GROQ_API_KEY environment variable.")
         return "\n\n[Groq summary skipped: no API key]"
+
+    extra_prompt = os.getenv("GROQ_EXTRA_PROMPT", "")
 
     try:
         quick_summary = ", ".join([
@@ -20,6 +21,10 @@ def get_groq_summary(coins_list, vs):
             "Make exactly 2 short, funny lines reacting to the market mood. "
             "Be simple, dumb, and light-hearted."
         )
+
+        # Append extra prompt from .env
+        if extra_prompt:
+            prompt += " " + extra_prompt
 
         print(f"[Groq Debug] Sending request to Groq API...\nPrompt:\n{prompt}\n")
 
@@ -38,7 +43,7 @@ def get_groq_summary(coins_list, vs):
                 "max_tokens": 40,
                 "temperature": 0.9
             },
-            timeout=10
+            timeout=15
         )
 
         print(f"[Groq Debug] Status code: {response.status_code}")
@@ -49,7 +54,6 @@ def get_groq_summary(coins_list, vs):
 
         data = response.json()
         summary = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-
         if not summary:
             print("[Groq Debug] Empty summary content.")
             return "\n\n[Summary unavailable]"
