@@ -1,18 +1,6 @@
 #!/usr/bin/env python3
 """
-Hourly Crypto Telegram Bot (with API fallbacks + Groq summary + Debugging)
-
-- Fetches crypto prices from CoinGecko, CoinPaprika, CoinCap, or CryptoCompare.
-- Posts formatted prices to a Telegram chat/channel.
-- Has modes: --once, --demo, or continuous posting every INTERVAL_MINUTES.
-- Adds a fun Groq AI summary under the crypto list.
-- Includes detailed debug logging to console.
-
-Credit footer:
-  *Pricing by t.me/hourlycrypto • Prices computed from [API_NAME]*
-
-Requirements:
-  pip install requests groq
+Hourly Crypto Telegram Bot (with API fallbacks + Groq summary + Debugging + Fast Proxy)
 """
 
 import os
@@ -21,24 +9,73 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from groq import get_groq_summary
 
-from proxy_selector import get_fastest_proxy
-import requests
+# ========================= Proxy Scraper / Selector =========================
+PROXY_SOURCES = [
+    "https://www.proxy-list.download/api/v1/get?type=https",
+    "https://www.proxyscan.io/download?type=https",
+]
+TEST_URL = "https://1.1.1.1"
+TIMEOUT = 5
+MAX_WORKERS = 20
 
+def fetch_proxy_list() -> List[str]:
+    proxies = set()
+    for url in PROXY_SOURCES:
+        try:
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            for line in r.text.splitlines():
+                line = line.strip()
+                if line:
+                    proxies.add(line)
+        except Exception as e:
+            print(f"⚠️ Falha ao buscar proxies de {url}: {e}")
+    return list(proxies)
+
+def test_proxy(proxy: str) -> (str, float):
+    proxies = {"http": f"http://{proxy}", "https": f"http://{proxy}"}
+    start = time.time()
+    try:
+        r = requests.get(TEST_URL, proxies=proxies, timeout=TIMEOUT)
+        if r.status_code == 200:
+            return proxy, time.time() - start
+    except:
+        pass
+    return proxy, float('inf')
+
+def get_fastest_proxy() -> Optional[str]:
+    proxy_list = fetch_proxy_list()
+    if not proxy_list:
+        print("❌ Nenhum proxy encontrado!")
+        return None
+
+    fastest_proxy = None
+    fastest_time = float('inf')
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(test_proxy, p): p for p in proxy_list}
+        for future in as_completed(futures):
+            proxy, latency = future.result()
+            if latency < fastest_time:
+                fastest_time = latency
+                fastest_proxy = proxy
+            print(f"Tested {proxy}: {latency:.2f}s")
+
+    if fastest_proxy:
+        print(f"✅ Proxy mais rápido: {fastest_proxy} ({fastest_time:.2f}s)")
+    return fastest_proxy
+
+# ========================= Global Proxy Setup =========================
 fast_proxy = get_fastest_proxy()
+proxies = {"http": f"http://{fast_proxy}", "https": f"http://{fast_proxy}"} if fast_proxy else None
 
-if fast_proxy:
-    proxies = {"http": f"http://{fast_proxy}", "https": f"http://{fast_proxy}"}
-else:
-    proxies = None
-
-# ========== Utility ==========
+# ========================= Utility =========================
 def log(msg: str) -> None:
-    """Print timestamped debug message."""
     print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
-
 
 def load_env_from_dotenv(path: str = ".env") -> None:
     try:
@@ -47,9 +84,7 @@ def load_env_from_dotenv(path: str = ".env") -> None:
         with open(path, "r", encoding="utf-8") as f:
             for raw_line in f:
                 line = raw_line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" not in line:
+                if not line or line.startswith("#") or "=" not in line:
                     continue
                 key, val = line.split("=", 1)
                 key = key.strip()
@@ -60,13 +95,11 @@ def load_env_from_dotenv(path: str = ".env") -> None:
     except Exception as e:
         log(f"⚠️ Failed to read .env: {e}")
 
-
 def get_bool_env(name: str, default: bool) -> bool:
     val = os.getenv(name)
     if val is None:
         return default
     return str(val).strip().lower() in {"1", "true", "yes", "on"}
-
 
 def get_int_env(name: str, default: int) -> int:
     val = os.getenv(name)
@@ -77,8 +110,7 @@ def get_int_env(name: str, default: int) -> int:
     except Exception:
         return default
 
-
-# ========== Formatting ==========
+# ========================= Formatting =========================
 def format_price(v: Optional[float]) -> str:
     if v is None:
         return "?"
@@ -93,7 +125,6 @@ def format_price(v: Optional[float]) -> str:
     except Exception:
         return str(v)
 
-
 def fmt_pct(p: Optional[float]) -> str:
     if p is None:
         return "?%"
@@ -104,101 +135,67 @@ def fmt_pct(p: Optional[float]) -> str:
     except Exception:
         return f"{arrow}{p}%"
 
-
-# ========== Data Fetchers ==========
+# ========================= Data Fetchers =========================
 def get_from_coingecko(vs_currency: str, ids: Optional[List[str]], top_n: int):
     log("🔄 Fetching from CoinGecko...")
     url = "https://api.coingecko.com/api/v3/coins/markets"
-    params = {
-        "vs_currency": vs_currency,
-        "order": "market_cap_desc",
-        "per_page": max(1, min(top_n, 250)),
-        "page": 1,
-        "sparkline": "false",
-        "price_change_percentage": "1h,24h",
-        "locale": "en",
-    }
+    params = {"vs_currency": vs_currency, "order": "market_cap_desc", "per_page": max(1, min(top_n, 250)), "page": 1, "sparkline": "false", "price_change_percentage": "1h,24h", "locale": "en"}
     if ids:
         params["ids"] = ",".join(ids)
-    r = requests.get(url, params=params, timeout=20)
+    r = requests.get(url, params=params, timeout=20, proxies=proxies)
     r.raise_for_status()
     log(f"✅ CoinGecko returned {len(r.json())} coins.")
     return r.json(), "CoinGecko"
 
-
 def get_from_coinpaprika(vs_currency: str, ids: Optional[List[str]], top_n: int):
     log("🔄 Fetching from CoinPaprika...")
     url = "https://api.coinpaprika.com/v1/tickers"
-    r = requests.get(url, timeout=20)
+    r = requests.get(url, timeout=20, proxies=proxies)
     r.raise_for_status()
     data = r.json()
     if ids:
         data = [x for x in data if x["id"] in ids]
     else:
         data = sorted(data, key=lambda x: x.get("rank", 9999))[:top_n]
-    converted = []
-    for c in data:
-        converted.append({
-            "id": c["id"],
-            "symbol": c["symbol"],
-            "name": c["name"],
-            "current_price": c["quotes"].get(vs_currency.upper(), {}).get("price"),
-            "market_cap": c["quotes"].get(vs_currency.upper(), {}).get("market_cap"),
-            "price_change_percentage_1h_in_currency": c["quotes"].get(vs_currency.upper(), {}).get("percent_change_1h"),
-            "price_change_percentage_24h_in_currency": c["quotes"].get(vs_currency.upper(), {}).get("percent_change_24h"),
-        })
+    converted = [{"id": c["id"], "symbol": c["symbol"], "name": c["name"],
+                  "current_price": c["quotes"].get(vs_currency.upper(), {}).get("price"),
+                  "market_cap": c["quotes"].get(vs_currency.upper(), {}).get("market_cap"),
+                  "price_change_percentage_1h_in_currency": c["quotes"].get(vs_currency.upper(), {}).get("percent_change_1h"),
+                  "price_change_percentage_24h_in_currency": c["quotes"].get(vs_currency.upper(), {}).get("percent_change_24h")} for c in data]
     log(f"✅ CoinPaprika returned {len(converted)} coins.")
     return converted, "CoinPaprika"
-
 
 def get_from_coincap(vs_currency: str, ids: Optional[List[str]], top_n: int):
     log("🔄 Fetching from CoinCap...")
     url = "https://api.coincap.io/v2/assets"
-    r = requests.get(url, timeout=20)
+    r = requests.get(url, timeout=20, proxies=proxies)
     r.raise_for_status()
     data = r.json()["data"]
     if ids:
         data = [x for x in data if x["id"] in ids]
     else:
         data = data[:top_n]
-    converted = []
-    for c in data:
-        converted.append({
-            "id": c["id"],
-            "symbol": c["symbol"],
-            "name": c["name"],
-            "current_price": float(c["priceUsd"]),
-            "market_cap": float(c["marketCapUsd"]),
-            "price_change_percentage_1h_in_currency": float(c.get("changePercent24Hr", 0)) / 24,
-            "price_change_percentage_24h_in_currency": float(c.get("changePercent24Hr", 0)),
-        })
+    converted = [{"id": c["id"], "symbol": c["symbol"], "name": c["name"],
+                  "current_price": float(c["priceUsd"]), "market_cap": float(c["marketCapUsd"]),
+                  "price_change_percentage_1h_in_currency": float(c.get("changePercent24Hr", 0)) / 24,
+                  "price_change_percentage_24h_in_currency": float(c.get("changePercent24Hr", 0))} for c in data]
     log(f"✅ CoinCap returned {len(converted)} coins.")
     return converted, "CoinCap"
-
 
 def get_from_cryptocompare(vs_currency: str, ids: Optional[List[str]], top_n: int):
     log("🔄 Fetching from CryptoCompare...")
     url = "https://min-api.cryptocompare.com/data/top/mktcapfull"
     params = {"limit": top_n, "tsym": vs_currency.upper()}
-    r = requests.get(url, params=params, timeout=20)
+    r = requests.get(url, params=params, timeout=20, proxies=proxies)
     r.raise_for_status()
     data = r.json().get("Data", [])
-    converted = []
-    for c in data:
-        info = c["CoinInfo"]
-        raw = c.get("RAW", {}).get(vs_currency.upper(), {})
-        converted.append({
-            "id": info["Name"].lower(),
-            "symbol": info["Name"],
-            "name": info["FullName"],
-            "current_price": raw.get("PRICE"),
-            "market_cap": raw.get("MKTCAP"),
-            "price_change_percentage_1h_in_currency": raw.get("CHANGEPCTHOUR"),
-            "price_change_percentage_24h_in_currency": raw.get("CHANGEPCTDAY"),
-        })
+    converted = [{"id": c["CoinInfo"]["Name"].lower(), "symbol": c["CoinInfo"]["Name"], "name": c["CoinInfo"]["FullName"],
+                  "current_price": c.get("RAW", {}).get(vs_currency.upper(), {}).get("PRICE"),
+                  "market_cap": c.get("RAW", {}).get(vs_currency.upper(), {}).get("MKTCAP"),
+                  "price_change_percentage_1h_in_currency": c.get("RAW", {}).get(vs_currency.upper(), {}).get("CHANGEPCTHOUR"),
+                  "price_change_percentage_24h_in_currency": c.get("RAW", {}).get(vs_currency.upper(), {}).get("CHANGEPCTDAY")} for c in data]
     log(f"✅ CryptoCompare returned {len(converted)} coins.")
     return converted, "CryptoCompare"
-
 
 def get_crypto_data(vs_currency: str, ids: Optional[List[str]], top_n: int):
     sources = [get_from_coingecko, get_from_coinpaprika, get_from_coincap, get_from_cryptocompare]
@@ -210,13 +207,12 @@ def get_crypto_data(vs_currency: str, ids: Optional[List[str]], top_n: int):
     log("❌ All API sources failed! Contact @patointeressante on Telegram.")
     sys.exit(1)
 
-
-# ========== Telegram ==========
+# ========================= Telegram =========================
 def send_telegram_message(token: str, chat_id: str, text: str) -> Dict[str, Any]:
     log("📤 Sending message to Telegram...")
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-    r = requests.post(url, json=payload, timeout=20)
+    r = requests.post(url, json=payload, timeout=20, proxies=proxies)
     try:
         data = r.json()
     except Exception:
@@ -227,8 +223,7 @@ def send_telegram_message(token: str, chat_id: str, text: str) -> Dict[str, Any]
     log("✅ Telegram message sent successfully.")
     return data
 
-
-# ========== Message Builder ==========
+# ========================= Message Builder =========================
 def build_message(coins: list[dict], vs: str, api_name: str, include_1h=True, include_24h=True, include_mcap=False) -> str:
     now_utc = datetime.now(timezone.utc)
     lines = [f"Crypto Prices ({vs.upper()}) — {now_utc:%Y-%m-%d %H:%M} UTC\n"]
@@ -253,7 +248,6 @@ def build_message(coins: list[dict], vs: str, api_name: str, include_1h=True, in
         except Exception as e:
             log(f"⚠️ Error formatting {c.get('symbol')}: {e}")
 
-    # Add Groq AI summary
     try:
         summary = get_groq_summary(coins, vs)
         if summary:
@@ -262,12 +256,10 @@ def build_message(coins: list[dict], vs: str, api_name: str, include_1h=True, in
     except Exception as e:
         log(f"⚠️ Groq summary failed: {e}")
 
-    # Footer
     lines.append(f"\n<i>Pricing by <b>t.me/hourlycrypto</b> • Prices computed from {api_name}.</i>")
     return "\n".join(lines)
 
-
-# ========== Posting Logic ==========
+# ========================= Posting Logic =========================
 def post_once() -> None:
     token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
@@ -286,8 +278,7 @@ def post_once() -> None:
     send_telegram_message(token, chat_id, msg)
     log(f"✅ Posted {len(coins)} coins using {api_name}.\n")
 
-
-# ========== Main ==========
+# ========================= Main =========================
 def main(argv: List[str]) -> None:
     load_env_from_dotenv()
     args = set(a.lower() for a in argv[1:])
@@ -305,7 +296,6 @@ def main(argv: List[str]) -> None:
             except Exception as e:
                 log(f"⚠️ Error during post_once: {e}")
             time.sleep(interval * 60)
-
 
 if __name__ == "__main__":
     try:
