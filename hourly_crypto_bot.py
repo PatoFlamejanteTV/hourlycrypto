@@ -24,6 +24,15 @@ import requests
 
 from groq import get_groq_summary
 
+from proxy_selector import get_fastest_proxy
+import requests
+
+fast_proxy = get_fastest_proxy()
+
+if fast_proxy:
+    proxies = {"http": f"http://{fast_proxy}", "https": f"http://{fast_proxy}"}
+else:
+    proxies = None
 
 # ========== Utility ==========
 def log(msg: str) -> None:
