@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import matplotlib.pyplot as plt
+import squarify
 
 from groq import get_groq_summary
 
@@ -223,6 +225,60 @@ def send_telegram_message(token: str, chat_id: str, text: str) -> Dict[str, Any]
     log("✅ Telegram message sent successfully.")
     return data
 
+def send_telegram_photo(token: str, chat_id: str, photo_path: str, caption: str) -> Dict[str, Any]:
+    log("📤 Sending photo to Telegram...")
+    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    files = {'photo': open(photo_path, 'rb')}
+    payload = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}
+    r = requests.post(url, files=files, data=payload, timeout=30, proxies=proxies)
+    try:
+        data = r.json()
+    except Exception:
+        r.raise_for_status()
+        data = {"ok": True}
+    if not data.get("ok"):
+        raise RuntimeError(f"Telegram API error: {data}")
+    log("✅ Telegram photo sent successfully.")
+    return data
+
+# ========================= Treemap Generation =========================
+def generate_treemap(coins: List[Dict[str, Any]], vs_currency: str, path: str = "treemap.png") -> Optional[str]:
+    log("🎨 Generating treemap...")
+    try:
+        # Filter out coins with missing or invalid data
+        coins = [c for c in coins if c.get("market_cap") and c.get("price_change_percentage_24h_in_currency") is not None]
+        if not coins:
+            log("⚠️ No valid coin data for treemap.")
+            return None
+
+        sizes = [c["market_cap"] for c in coins]
+        price_changes = [c["price_change_percentage_24h_in_currency"] for c in coins]
+
+        # Determine colors based on price change
+        colors = ['#2ECC71' if change >= 0 else '#E74C3C' for change in price_changes]
+
+        # Create labels for each coin
+        labels = [f"{c['symbol'].upper()}\n{fmt_pct(c['price_change_percentage_24h_in_currency'])}" for c in coins]
+
+        plt.figure(figsize=(20, 12), dpi=150)
+        squarify.plot(sizes=sizes, label=labels, color=colors, alpha=0.8, text_kwargs={'fontsize':10, 'color':'white', 'fontweight':'bold'})
+
+        plt.title(f"Cryptocurrency Market Cap Treemap (24h % Change vs {vs_currency.upper()})", fontsize=24, fontweight='bold', color='white')
+        plt.axis('off')
+
+        # Dark theme background
+        plt.gca().set_facecolor('#1A1A1A')
+        plt.gcf().set_facecolor('#1A1A1A')
+
+        plt.savefig(path, bbox_inches='tight', pad_inches=0.1)
+        plt.close()
+
+        log(f"✅ Treemap saved to {path}")
+        return path
+    except Exception as e:
+        log(f"⚠️ Failed to generate treemap: {e}")
+        return None
+
 # ========================= Message Builder =========================
 def build_message(coins: list[dict], vs: str, api_name: str, include_1h=True, include_24h=True, include_mcap=False) -> str:
     now_utc = datetime.now(timezone.utc)
@@ -274,8 +330,19 @@ def post_once() -> None:
 
     log(f"🚀 Fetching crypto data (vs={vs}, top_n={top_n})...")
     coins, api_name = get_crypto_data(vs, ids or None, top_n)
+
+    # Generate Treemap
+    treemap_path = generate_treemap(coins, vs)
+
+    # Build Message and Send
     msg = build_message(coins, vs, api_name, include_1h, include_24h, include_mcap)
-    send_telegram_message(token, chat_id, msg)
+
+    if treemap_path:
+        send_telegram_photo(token, chat_id, treemap_path, msg)
+        os.remove(treemap_path)  # Clean up the generated image
+    else:
+        send_telegram_message(token, chat_id, msg)
+
     log(f"✅ Posted {len(coins)} coins using {api_name}.\n")
 
 # ========================= Main =========================
