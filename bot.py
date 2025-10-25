@@ -263,7 +263,7 @@ def generate_treemap(coins: List[Dict[str, Any]], vs_currency: str, path: str = 
         plt.figure(figsize=(20, 12), dpi=150)
         squarify.plot(sizes=sizes, label=labels, color=colors, alpha=0.8, text_kwargs={'fontsize':10, 'color':'white', 'fontweight':'bold'})
 
-        plt.title(f"Cryptocurrency Market Cap Treemap (24h % Change vs {vs_currency.upper()})", fontsize=24, fontweight='bold', color='white')
+        plt.title(f"[t.me/hourlycrypto] Crypto Market Cap Treemap (24h % Change vs {vs_currency.upper()})", fontsize=24, fontweight='bold', color='white')
         plt.axis('off')
 
         # Dark theme background
