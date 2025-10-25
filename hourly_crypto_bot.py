@@ -88,12 +88,12 @@ def format_price(v: Optional[float]) -> str:
 def fmt_pct(p: Optional[float]) -> str:
     if p is None:
         return "?%"
-    arrow = "" if p == 0 else ("▲" if p > 0 else "▼")
-    sign = "+" if p and p > 0 else ""
+    emoji = "💚" if p > 0 else "❤️" if p < 0 else "➡️"
+    sign = "+" if p > 0 else ""
     try:
-        return f"{arrow}{sign}{p:.2f}%"
+        return f"{sign}{p:.2f}%{emoji}"
     except Exception:
-        return f"{arrow}{p}%"
+        return f"{p}%{emoji}"
 
 
 # ========== Data Fetchers ==========
@@ -203,6 +203,42 @@ def get_crypto_data(vs_currency: str, ids: Optional[List[str]], top_n: int):
 
 
 # ========== Telegram ==========
+def get_fear_and_greed_index():
+    log("🔄 Fetching Fear & Greed Index from alternative.me...")
+    url = "https://api.alternative.me/fng/?limit=1"
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        data = r.json()["data"][0]
+        log("✅ Fear & Greed Index fetched successfully.")
+        return {
+            "value": data["value"],
+            "classification": data["value_classification"],
+        }
+    except Exception as e:
+        log(f"⚠️ Could not fetch Fear & Greed Index: {e}")
+        return None
+
+
+def get_global_metrics(vs_currency: str):
+    log("🔄 Fetching global metrics from CoinGecko...")
+    url = "https://api.coingecko.com/api/v3/global"
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        data = r.json()["data"]
+        log("✅ Global metrics fetched successfully.")
+        return {
+            "btc_dominance": data["market_cap_percentage"].get("btc"),
+            "eth_dominance": data["market_cap_percentage"].get("eth"),
+            "total_market_cap": data["total_market_cap"].get(vs_currency.lower()),
+            "market_cap_change_24h": data["market_cap_change_percentage_24h_usd"],
+        }
+    except Exception as e:
+        log(f"⚠️ Could not fetch global metrics: {e}")
+        return None
+
+
 def send_telegram_message(token: str, chat_id: str, text: str) -> Dict[str, Any]:
     log("📤 Sending message to Telegram...")
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -220,35 +256,46 @@ def send_telegram_message(token: str, chat_id: str, text: str) -> Dict[str, Any]
 
 
 # ========== Message Builder ==========
-def build_message(coins: list[dict], vs: str, api_name: str, include_1h=True, include_24h=True, include_mcap=False) -> str:
-    now_utc = datetime.now(timezone.utc)
-    lines = [f"Crypto Prices ({vs.upper()}) — {now_utc:%Y-%m-%d %H:%M} UTC\n"]
+def build_message(coins: list[dict], vs: str, api_name: str) -> str:
+    lines = ["💲 <b>CoinMarketCap</b>:", "-------------------------"]
+
     for c in coins:
         try:
+            name = c.get("name", "?")
             symbol = c.get("symbol", "?").upper()
             price = c.get("current_price")
-            p1h = c.get("price_change_percentage_1h_in_currency")
             p24h = c.get("price_change_percentage_24h_in_currency")
-            mcap = c.get("market_cap")
-            parts = [f"{symbol} ${format_price(price)}"]
-            changes = []
-            if include_1h:
-                changes.append(f"1h: {fmt_pct(p1h)}")
-            if include_24h:
-                changes.append(f"24h: {fmt_pct(p24h)}")
-            if changes:
-                parts.append(" | ".join(changes))
-            if include_mcap:
-                parts.append(f"MC: ${format_price(mcap)}")
-            lines.append(" ".join(parts))
+
+            lines.append(f"<b>{name} #{symbol}</b>: ${format_price(price)}")
+            lines.append(f"Last 24 hours: {fmt_pct(p24h)}")
+            lines.append("-------------------------")
         except Exception as e:
             log(f"⚠️ Error formatting {c.get('symbol')}: {e}")
+
+    # Global Metrics
+    global_metrics = get_global_metrics(vs)
+    if global_metrics:
+        lines.append("<b>Global Metrics:</b>")
+        lines.append(f"BTC dominance: {global_metrics.get('btc_dominance'):.2f}%")
+        lines.append(f"ETH dominance: {global_metrics.get('eth_dominance'):.2f}%")
+
+        mcap_total = global_metrics.get('total_market_cap')
+        mcap_change = global_metrics.get('market_cap_change_24h')
+
+        if mcap_total is not None and mcap_change is not None:
+            formatted_mcap = f"${mcap_total / 1_000_000_000_000:.2f}T"
+            lines.append(f"Market Cap: {formatted_mcap} {fmt_pct(mcap_change)}")
+
+        fng = get_fear_and_greed_index()
+        if fng:
+            lines.append(f"Fear & Greed: {fng['value']}/100 {fng['classification']}")
+        lines.append("-------------------------")
 
     # Add Groq AI summary
     try:
         summary = get_groq_summary(coins, vs)
         if summary:
-            lines.append("\n" + summary)
+            lines.append(summary)
             log("💬 Added Groq AI summary.")
     except Exception as e:
         log(f"⚠️ Groq summary failed: {e}")
@@ -267,13 +314,10 @@ def post_once() -> None:
     vs = os.getenv("CURRENCY", "usd")
     ids = [x.strip() for x in os.getenv("COIN_IDS", "").split(",") if x.strip()]
     top_n = get_int_env("TOP_N", 10)
-    include_mcap = get_bool_env("INCLUDE_MARKET_CAP", False)
-    include_24h = get_bool_env("INCLUDE_24H", True)
-    include_1h = get_bool_env("INCLUDE_1H", True)
 
     log(f"🚀 Fetching crypto data (vs={vs}, top_n={top_n})...")
     coins, api_name = get_crypto_data(vs, ids or None, top_n)
-    msg = build_message(coins, vs, api_name, include_1h, include_24h, include_mcap)
+    msg = build_message(coins, vs, api_name)
     send_telegram_message(token, chat_id, msg)
     log(f"✅ Posted {len(coins)} coins using {api_name}.\n")
 
