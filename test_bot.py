@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 # This is a bit of a hack to import the bot script as a module
 import sys
 sys.path.append('.')
-import bot
+import hourly_crypto_bot as bot
 
 class TestScheduler(unittest.TestCase):
 
