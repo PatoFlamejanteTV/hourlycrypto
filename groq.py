@@ -10,16 +10,32 @@ def get_groq_summary(coins, global_metrics, fear_greed_index, vs):
     extra_prompt = os.getenv("GROQ_EXTRA_PROMPT", "")
 
     try:
+        # Build a summary of top coin performance
         quick_summary = ", ".join([
-            f"{c.get('symbol', '').upper()} {c.get('price_change_percentage_24h_in_currency', 0):+.1f}%"
-            for c in coins_list[:10]
-            if 'price_change_percentage_24h_in_currency' in c
+            f"{c.symbol.upper()} {c.p24h:+.1f}%"
+            for c in coins[:10] if c.p24h is not None
         ]) or "No data available"
 
+        # Build market context string
+        market_context = []
+        if global_metrics:
+            total_mcap = global_metrics.get("total_market_cap", {}).get(vs.lower())
+            mcap_change = global_metrics.get("market_cap_change_percentage_24h_usd")
+            if total_mcap and mcap_change:
+                market_context.append(f"Total Market Cap: ~${int(total_mcap)} ({mcap_change:+.1f}%)")
+
+        if fear_greed_index:
+            value = fear_greed_index.get("value")
+            classification = fear_greed_index.get("value_classification")
+            if value and classification:
+                market_context.append(f"Fear/Greed Index: {value} ({classification})")
+
+        context_str = ". ".join(market_context)
+
         prompt = (
-            f"Crypto today ({vs.upper()}): {quick_summary}\n"
-            "Make exactly one short, funny line reacting to the market mood. "
-            "Be simple, dumb, and light-hearted."
+            f"Top Coins ({vs.upper()}): {quick_summary}. "
+            f"Market Context: {context_str}. "
+            "Based on this data, make exactly one short, funny, dumb, light-hearted line reacting to the market mood."
         )
 
         # Append extra prompt from .env
