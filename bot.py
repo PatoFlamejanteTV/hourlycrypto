@@ -471,12 +471,14 @@ def post_once() -> None:
 
     log(f"🚀 Fetching crypto data (vs={vs}, top_n={top_n})...")
     coins, api_name = get_crypto_data(vs, ids or None, top_n)
+    global_metrics = get_global_metrics()
+    fear_greed_index = get_fear_greed_index()
 
     # Generate Treemap
     treemap_path = generate_treemap(coins, vs)
 
     # Build Message and Send
-    msg = build_message(coins, vs, api_name, include_1h, include_24h, include_mcap)
+    msg = build_message(coins, global_metrics, fear_greed_index, vs, api_name, include_1h, include_24h, include_mcap)
 
     if treemap_path:
         send_telegram_photo(token, chat_id, treemap_path, msg)

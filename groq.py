@@ -1,4 +1,4 @@
-def get_groq_summary(coins_list, vs):
+def get_groq_summary(coins, global_metrics, fear_greed_index, vs):
     import os
     import requests
 
