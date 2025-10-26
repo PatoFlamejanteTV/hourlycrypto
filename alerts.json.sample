@@ -1,0 +1,14 @@
+[
+  {
+    "coin_id": "bitcoin",
+    "threshold": 50000,
+    "direction": "above",
+    "chat_id": "YOUR_CHAT_ID"
+  },
+  {
+    "coin_id": "ethereum",
+    "threshold": 4000,
+    "direction": "below",
+    "chat_id": "YOUR_CHAT_ID"
+  }
+]
