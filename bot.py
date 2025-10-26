@@ -291,11 +291,18 @@ def main(argv: List[str]) -> None:
     else:
         log(f"⏳ Running continuously every {interval} minutes.")
         while True:
+            start_time = time.time()
             try:
                 post_once()
             except Exception as e:
                 log(f"⚠️ Error during post_once: {e}")
-            time.sleep(interval * 60)
+
+            # Calculate execution time and sleep for the remainder of the interval
+            execution_time = time.time() - start_time
+            sleep_time = max(0, interval * 60 - execution_time)
+
+            log(f"Execution time: {execution_time:.2f}s. Sleeping for {sleep_time:.2f}s.")
+            time.sleep(sleep_time)
 
 if __name__ == "__main__":
     try:
