@@ -13,7 +13,6 @@ Hourly Crypto Telegram Bot
 import os
 import sys
 import time
-import warnings
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
@@ -163,17 +162,15 @@ def format_price(v: Optional[float]) -> str:
         return str(v)
 
 
-def fmt_pct(p: Optional[float], emojis: bool = True) -> str:
+def fmt_pct(p: Optional[float]) -> str:
     if p is None:
         return "?"
     emoji = "💚" if p > 0 else "❤️" if p < 0 else "🤍"
     sign = "+" if p > 0 else ""
     try:
-        val = f"{sign}{p:.2f}%"
-        return f"{emoji} {val}" if emojis else val
+        return f"{emoji} {sign}{p:.2f}%"
     except Exception:
-        val = f"{sign}{p}%"
-        return f"{emoji} {val}" if emojis else val
+        return f"{emoji} {p}%"
 
 
 # ========================= Data Fetchers =========================
@@ -206,8 +203,7 @@ def get_from_coingecko(vs_currency: str, ids: Optional[List[str]], top_n: int):
     }
     if ids:
         params["ids"] = ",".join(ids)
-    headers = {"User-Agent": "hourly-crypto-bot/1.0"}
-    r = requests.get(url, params=params, timeout=20, proxies=proxies, headers=headers)
+    r = requests.get(url, params=params, timeout=20, proxies=proxies)
     r.raise_for_status()
     data = r.json()
     log(f"✅ CoinGecko returned {len(data)} coins.")
@@ -310,8 +306,7 @@ def get_global_metrics():
     try:
         log("🔄 Fetching global metrics from CoinGecko...")
         url = "https://api.coingecko.com/api/v3/global"
-        headers = {"User-Agent": "hourly-crypto-bot/1.0"}
-        r = requests.get(url, timeout=15, headers=headers)
+        r = requests.get(url, timeout=15)
         r.raise_for_status()
         metrics = r.json().get("data", {})
         log("✅ Global metrics fetched successfully.")
@@ -351,12 +346,6 @@ def generate_treemap(coins: List[Coin], vs_currency: str, path: str = "treemap.p
         labels = [f"{c.symbol.upper()}\n{fmt_pct(c.p24h)}" for c in valid]
 
         plt.figure(figsize=(20, 12), dpi=150)
-        # Define a font that supports emojis
-        try:
-            plt.rcParams['font.sans-serif'] = ["Noto Color Emoji", "Segoe UI Emoji", "sans-serif"]
-        except Exception as e:
-            log(f"⚠️ Could not set emoji font: {e}")
-
         squarify.plot(
             sizes=sizes,
             label=labels,
@@ -374,33 +363,7 @@ def generate_treemap(coins: List[Coin], vs_currency: str, path: str = "treemap.p
         plt.gca().set_facecolor('#1A1A1A')
         plt.gcf().set_facecolor('#1A1A1A')
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            plt.savefig(path, bbox_inches='tight', pad_inches=0.1)
-
-            # Check if a font warning was raised
-            if any("Glyph" in str(warn.message) for warn in w):
-                log("⚠️ Emoji font not found, re-rendering treemap without emojis.")
-                plt.clf()  # Clear the plot
-                labels_no_emoji = [f"{c.symbol.upper()}\n{fmt_pct(c.p24h, emojis=False)}" for c in valid]
-                squarify.plot(
-                    sizes=sizes,
-                    label=labels_no_emoji,
-                    color=colors,
-                    alpha=0.8,
-                    text_kwargs={'fontsize': 10, 'color': 'white', 'fontweight': 'bold'}
-                )
-                plt.title(
-                    f"[t.me/hourlycrypto] Market Treemap (24h vs {vs_currency.upper()})",
-                    fontsize=24,
-                    fontweight='bold',
-                    color='white'
-                )
-                plt.axis('off')
-                plt.gca().set_facecolor('#1A1A1A')
-                plt.gcf().set_facecolor('#1A1A1A')
-                plt.savefig(path, bbox_inches='tight', pad_inches=0.1)
-
+        plt.savefig(path, bbox_inches='tight', pad_inches=0.1)
         plt.close()
         log(f"✅ Treemap saved to {path}")
         return path
@@ -481,7 +444,7 @@ def build_message(
     # AI Summary
     summary_lines = []
     try:
-        summary = get_groq_summary(coins, vs)
+        summary = get_groq_summary(coins, global_metrics, fear_greed_index, vs)
         if summary:
             summary_lines = ["\n<b><u>AI Summary</u></b>", summary]
             log("💬 Added Groq summary.")
@@ -508,16 +471,12 @@ def post_once() -> None:
 
     log(f"🚀 Fetching crypto data (vs={vs}, top_n={top_n})...")
     coins, api_name = get_crypto_data(vs, ids or None, top_n)
-    global_metrics = get_global_metrics()
-    fear_greed_index = get_fear_greed_index()
 
     # Generate Treemap
     treemap_path = generate_treemap(coins, vs)
 
     # Build Message and Send
-    msg = build_message(
-        coins, global_metrics, fear_greed_index, vs, api_name, include_1h, include_24h, include_mcap
-    )
+    msg = build_message(coins, vs, api_name, include_1h, include_24h, include_mcap)
 
     if treemap_path:
         send_telegram_photo(token, chat_id, treemap_path, msg)
