@@ -90,10 +90,6 @@ def get_fastest_proxy() -> Optional[str]:
     return fastest_proxy
 
 
-fast_proxy = get_fastest_proxy()
-proxies = {"http": f"http://{fast_proxy}", "https": f"http://{fast_proxy}"} if fast_proxy else None
-
-
 # ========================= Data Classes =========================
 
 @dataclass
@@ -190,7 +186,7 @@ def _transform_coingecko(raw_coins: List[Dict[str, Any]]) -> List[Coin]:
     ]
 
 
-def get_from_coingecko(vs_currency: str, ids: Optional[List[str]], top_n: int):
+def get_from_coingecko(vs_currency: str, ids: Optional[List[str]], top_n: int, proxies: dict):
     log("🔄 Fetching from CoinGecko...")
     url = "https://api.coingecko.com/api/v3/coins/markets"
     params = {
@@ -210,7 +206,7 @@ def get_from_coingecko(vs_currency: str, ids: Optional[List[str]], top_n: int):
     return _transform_coingecko(data), "CoinGecko"
 
 
-def get_from_coinpaprika(vs_currency: str, ids: Optional[List[str]], top_n: int):
+def get_from_coinpaprika(vs_currency: str, ids: Optional[List[str]], top_n: int, proxies: dict):
     log("🔄 Fetching from CoinPaprika...")
     url = "https://api.coinpaprika.com/v1/tickers"
     r = requests.get(url, timeout=20, proxies=proxies)
@@ -237,7 +233,7 @@ def get_from_coinpaprika(vs_currency: str, ids: Optional[List[str]], top_n: int)
     return converted, "CoinPaprika"
 
 
-def get_from_coincap(vs_currency: str, ids: Optional[List[str]], top_n: int):
+def get_from_coincap(vs_currency: str, ids: Optional[List[str]], top_n: int, proxies: dict):
     log("🔄 Fetching from CoinCap...")
     url = "https://api.coincap.io/v2/assets"
     r = requests.get(url, timeout=20, proxies=proxies)
@@ -263,7 +259,7 @@ def get_from_coincap(vs_currency: str, ids: Optional[List[str]], top_n: int):
     return converted, "CoinCap"
 
 
-def get_from_cryptocompare(vs_currency: str, ids: Optional[List[str]], top_n: int):
+def get_from_cryptocompare(vs_currency: str, ids: Optional[List[str]], top_n: int, proxies: dict):
     log("🔄 Fetching from CryptoCompare...")
     url = "https://min-api.cryptocompare.com/data/top/mktcapfull"
     params = {"limit": top_n, "tsym": vs_currency.upper()}
@@ -286,7 +282,7 @@ def get_from_cryptocompare(vs_currency: str, ids: Optional[List[str]], top_n: in
     return converted, "CryptoCompare"
 
 
-def get_crypto_data(vs_currency: str, ids: Optional[List[str]], top_n: int):
+def get_crypto_data(vs_currency: str, ids: Optional[List[str]], top_n: int, proxies: dict):
     sources = [
         get_from_coingecko,
         get_from_coinpaprika,
@@ -295,7 +291,7 @@ def get_crypto_data(vs_currency: str, ids: Optional[List[str]], top_n: int):
     ]
     for fetcher in sources:
         try:
-            return fetcher(vs_currency, ids, top_n)
+            return fetcher(vs_currency, ids, top_n, proxies)
         except Exception as e:
             log(f"⚠️ {fetcher.__name__} failed: {e}")
     log("❌ All coin API sources failed!")
@@ -374,7 +370,7 @@ def generate_treemap(coins: List[Coin], vs_currency: str, path: str = "treemap.p
 
 # ========================= Telegram =========================
 
-def send_telegram_message(token: str, chat_id: str, text: str) -> None:
+def send_telegram_message(token: str, chat_id: str, text: str, proxies: dict) -> None:
     log("📤 Sending message to Telegram...")
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
@@ -385,7 +381,7 @@ def send_telegram_message(token: str, chat_id: str, text: str) -> None:
     log("✅ Telegram message sent successfully.")
 
 
-def send_telegram_photo(token: str, chat_id: str, photo_path: str, caption: str) -> None:
+def send_telegram_photo(token: str, chat_id: str, photo_path: str, caption: str, proxies: dict) -> None:
     log("📤 Sending photo to Telegram...")
     url = f"https://api.telegram.org/bot{token}/sendPhoto"
     files = {"photo": open(photo_path, "rb")}
@@ -458,6 +454,8 @@ def build_message(
 # ========================= Posting Logic =========================
 
 def post_once() -> None:
+    fast_proxy = get_fastest_proxy()
+    proxies = {"http": f"http://{fast_proxy}", "https": f"http://{fast_proxy}"} if fast_proxy else None
     token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         log("❌ TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set.")
@@ -470,21 +468,21 @@ def post_once() -> None:
     include_1h = get_bool_env("INCLUDE_1H", True)
 
     log(f"🚀 Fetching crypto data (vs={vs}, top_n={top_n})...")
-    coins, api_name = get_crypto_data(vs, ids or None, top_n)
+    coins, api_name = get_crypto_data(vs, ids or None, top_n, proxies)
     global_metrics = get_global_metrics()
-    fear_greed = get_fear_greed_index()
+    fear_greed_index = get_fear_greed_index()
 
     # Generate Treemap
     treemap_path = generate_treemap(coins, vs)
 
     # Build Message and Send
-    msg = build_message(coins, global_metrics, fear_greed, vs, api_name, include_1h, include_24h, include_mcap)
+    msg = build_message(coins, global_metrics, fear_greed_index, vs, api_name, include_1h, include_24h, include_mcap)
 
     if treemap_path:
-        send_telegram_photo(token, chat_id, treemap_path, msg)
+        send_telegram_photo(token, chat_id, treemap_path, msg, proxies)
         os.remove(treemap_path)  # Clean up the generated image
     else:
-        send_telegram_message(token, chat_id, msg)
+        send_telegram_message(token, chat_id, msg, proxies)
 
     log(f"✅ Posted {len(coins)} coins using {api_name}.\n")
 
