@@ -75,6 +75,18 @@ Note: Values in a `.env` file are loaded only if the variable is not already set
 
 ## Usage
 
+### Option 1: Deploy on Vercel (Recommended - Always Running)
+
+Deploy to Vercel for automatic, scheduled execution without keeping your computer on:
+
+1. Follow the detailed guide in `VERCEL_DEPLOYMENT.md`
+2. Set environment variables in Vercel Dashboard
+3. The bot will automatically post every hour (or your configured schedule)
+
+**Benefits**: No computer needed, reliable, free tier sufficient, automatic execution
+
+### Option 2: Run Locally
+
 Run from the project directory:
 
 - Post once and exit (useful for schedulers like Task Scheduler/cron):
@@ -91,9 +103,7 @@ python hourly_crypto_bot.py
 
 To customize the interval, set `INTERVAL_MINUTES` (e.g., 15, 30, 60). The bot aligns posting to the next N-minute UTC boundary to avoid drift.
 
----
-
-## Windows Task Scheduler (Hourly Posting)
+### Option 3: Windows Task Scheduler (Local Hourly Posting)
 
 1. Open Task Scheduler → Create Basic Task
 2. Trigger: Daily → Repeat task every: 1 hour (or set a specific schedule)
@@ -103,7 +113,7 @@ To customize the interval, set `INTERVAL_MINUTES` (e.g., 15, 30, 60). The bot al
    - Start in: `c:\Users\mcmco\hourlycrypto`
 4. Ensure your environment variables or `.env` file are accessible to the task user.
 
-Alternatively, keep the script running in a terminal without Task Scheduler.
+**Note**: Computer must remain on for Task Scheduler to work. Consider Vercel deployment for 24/7 operation.
 
 ---
 
