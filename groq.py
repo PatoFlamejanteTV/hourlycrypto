@@ -10,10 +10,11 @@ def get_groq_summary(coins, global_metrics, fear_greed_index, vs):
     extra_prompt = os.getenv("GROQ_EXTRA_PROMPT", "")
 
     try:
+        # Use the Coin dataclass for a consistent summary
         quick_summary = ", ".join([
-            f"{c.get('symbol', '').upper()} {c.get('price_change_percentage_24h_in_currency', 0):+.1f}%"
-            for c in coins_list[:10]
-            if 'price_change_percentage_24h_in_currency' in c
+            f"{c.symbol.upper()} {c.p24h:+.1f}%"
+            for c in coins[:10]
+            if c.p24h is not None
         ]) or "No data available"
 
         prompt = (
