@@ -13,7 +13,7 @@ Hourly Crypto Telegram Bot
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 import requests
@@ -497,13 +497,25 @@ def main(argv: List[str]) -> None:
     elif "--demo" in args:
         post_once()
     else:
-        log(f"⏳ Running continuously every {interval} minutes.")
+        log(f"⏳ Running continuously every {interval} minutes, aligned to UTC.")
         while True:
             try:
                 post_once()
             except Exception as e:
                 log(f"⚠️ Error during post_once: {e}")
-            time.sleep(interval * 60)
+
+            now_utc = datetime.now(timezone.utc)
+            minutes_to_next_interval = interval - (now_utc.minute % interval)
+            next_run_time = (now_utc + timedelta(minutes=minutes_to_next_interval)).replace(second=0, microsecond=0)
+
+            sleep_seconds = (next_run_time - now_utc).total_seconds()
+
+            if sleep_seconds <= 0:
+                next_run_time += timedelta(minutes=interval)
+                sleep_seconds = (next_run_time - now_utc).total_seconds()
+
+            log(f"⏰ Next post at {next_run_time.strftime('%Y-%m-%d %H:%M:%S UTC')}. Sleeping for {sleep_seconds:.2f} seconds.")
+            time.sleep(sleep_seconds)
 
 if __name__ == "__main__":
     try:
