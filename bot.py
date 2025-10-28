@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 import squarify
 
 # Optional: AI summary from Groq (your custom module)
@@ -328,6 +329,35 @@ def get_fear_greed_index():
 
 # ========================= Treemap Generation =========================
 
+def get_emoji_font() -> Optional[str]:
+    """Scan system fonts to find one that supports common emojis."""
+    emoji_test_string = "😂👍❤️"
+    font_prefs = ["Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", "Twitter Color Emoji"]
+
+    # Check preferred fonts first
+    for font_name in font_prefs:
+        try:
+            if fm.fontManager.findfont(font_name, fallback_to_default=False):
+                log(f"✅ Found preferred emoji font: {font_name}")
+                return font_name
+        except Exception:
+            continue
+
+    # Fallback: scan all fonts
+    for font in fm.fontManager.ttflist:
+        try:
+            font_path = fm.findfont(font.name)
+            prop = fm.FontProperties(fname=font_path)
+            # A simple heuristic: check if the font name contains "Emoji"
+            if "emoji" in font.name.lower():
+                 log(f"✅ Found fallback emoji font by name: {font.name}")
+                 return font.name
+        except Exception:
+            continue
+
+    log("⚠️ No suitable emoji font found. Emojis might not render correctly.")
+    return None
+
 def generate_treemap(coins: List[Coin], vs_currency: str, path: str = "treemap.png") -> Optional[str]:
     log("🎨 Generating treemap...")
     try:
@@ -341,19 +371,27 @@ def generate_treemap(coins: List[Coin], vs_currency: str, path: str = "treemap.p
         colors = ['#2ECC71' if change >= 0 else '#E74C3C' for change in price_changes]
         labels = [f"{c.symbol.upper()}\n{fmt_pct(c.p24h)}" for c in valid]
 
+        # Font selection for emoji support
+        emoji_font = get_emoji_font()
+        text_kwargs = {'fontsize': 10, 'color': 'white', 'fontweight': 'bold'}
+        if emoji_font:
+            text_kwargs['fontname'] = emoji_font
+
+        title_kwargs = {'fontsize': 24, 'fontweight': 'bold', 'color': 'white'}
+        if emoji_font:
+            title_kwargs['fontname'] = emoji_font
+
         plt.figure(figsize=(20, 12), dpi=150)
         squarify.plot(
             sizes=sizes,
             label=labels,
             color=colors,
             alpha=0.8,
-            text_kwargs={'fontsize': 10, 'color': 'white', 'fontweight': 'bold'}
+            text_kwargs=text_kwargs
         )
         plt.title(
             f"[t.me/hourlycrypto] Market Treemap (24h vs {vs_currency.upper()})",
-            fontsize=24,
-            fontweight='bold',
-            color='white'
+            **title_kwargs
         )
         plt.axis('off')
         plt.gca().set_facecolor('#1A1A1A')
