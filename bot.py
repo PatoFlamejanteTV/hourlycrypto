@@ -492,8 +492,13 @@ def build_message(
 # ========================= Posting Logic =========================
 
 def post_once() -> None:
-    fast_proxy = get_fastest_proxy()
-    proxies = {"http": f"http://{fast_proxy}", "https": f"http://{fast_proxy}"} if fast_proxy else None
+    proxies = None
+    if get_bool_env("PROXY", False):
+        log("🕵️ Proxy checking enabled.")
+        fast_proxy = get_fastest_proxy()
+        if fast_proxy:
+            proxies = {"http": f"http://{fast_proxy}", "https": f"http://{fast_proxy}"}
+
     token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         log("❌ TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set.")
