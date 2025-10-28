@@ -366,7 +366,7 @@ def generate_treemap(coins: List[Coin], vs_currency: str, path: str = "treemap.p
             log("⚠️ No valid coin data for treemap.")
             return None
 
-        sizes = [c.mcap for c in valid]
+        sizes = [abs(c.p24h) for c in valid]
         price_changes = [c.p24h for c in valid]
         colors = ['#2ECC71' if change >= 0 else '#E74C3C' for change in price_changes]
         labels = [f"{c.symbol.upper()}\n{fmt_pct(c.p24h)}" for c in valid]
